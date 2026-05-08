@@ -1,0 +1,18 @@
+{
+  "myapp": {
+    "name": "My App",
+    "emoji": "📱"
+  },
+  "tracker": {
+    "name": "Tracker",
+    "emoji": "📊"
+  },
+  "notes": {
+    "name": "Notes Pro",
+    "emoji": "📝"
+  },
+  "other": {
+    "name": "Other",
+    "emoji": "💬"
+  }
+}

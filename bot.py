@@ -7,12 +7,17 @@ Run: BOT_TOKEN=xxx ADMIN_CHAT_ID=xxx python3 bot.py
 
 import json
 import os
+import tempfile
 from pathlib import Path
+from typing import Any
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
+APP_CONFIG_FILE = os.environ.get("APP_CONFIG_FILE", "")
 
 DATA_DIR = Path(__file__).parent / "data"
 SESSIONS_FILE = DATA_DIR / "sessions.json"
@@ -26,20 +31,54 @@ APPS = {
 # ──────────────────────────────────────────────────────────────
 
 
-def load_json(path: Path) -> dict:
+def load_json(path: Path) -> dict[str, Any]:
     if path.exists():
         return json.loads(path.read_text())
     return {}
 
 
-def save_json(path: Path, data: dict):
+def save_json(path: Path, data: dict[str, Any]) -> None:
+    """Write JSON atomically so a restart cannot leave half-written state."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
+        tmp.write(content)
+        tmp.write("\n")
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+
+
+def load_apps() -> dict[str, dict[str, str]]:
+    if not APP_CONFIG_FILE:
+        return APPS
+    config_path = Path(APP_CONFIG_FILE)
+    loaded = load_json(config_path)
+    if not loaded:
+        raise ValueError(f"App config is empty: {config_path}")
+    return loaded
+
+
+def app_label(app: dict[str, str]) -> str:
+    return f"{app.get('emoji', '💬')} {app.get('name', 'Other')}"
+
+
+def md(value: object) -> str:
+    return escape_markdown(str(value), version=2)
+
+
+def build_admin_header(app: dict[str, str], user) -> str:
+    username = f"@{user.username}" if user.username else "no username"
+    return (
+        f"*{md(app_label(app))}*\n"
+        f"*From:* {md(user.first_name or 'Unknown')} \\({md(username)}\\)\n"
+        f"*User ID:* `{md(user.id)}`\n\n"
+    )
 
 
 # Persistent state
 sessions = load_json(SESSIONS_FILE)   # {user_id: {"app": "myapp", "name": "John"}}
 forwarded = load_json(FORWARDED_FILE) # {admin_msg_id: user_chat_id}
+configured_apps = load_apps()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,12 +88,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Deep link: /start app_myapp
     if args and args[0].startswith("app_"):
         app_key = args[0].replace("app_", "")
-        if app_key in APPS:
+        if app_key in configured_apps:
             sessions[str(user.id)] = {"app": app_key, "name": user.first_name}
             save_json(SESSIONS_FILE, sessions)
-            app = APPS[app_key]
+            app = configured_apps[app_key]
             await update.message.reply_text(
-                f"Hi {user.first_name}! You're contacting support for {app['emoji']} {app['name']}.\n\n"
+                f"Hi {user.first_name}! You're contacting support for {app_label(app)}.\n\n"
                 f"Type your message and I'll get back to you soon."
             )
             return
@@ -62,8 +101,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # No deep link — show app picker
     keyboard = []
     row = []
-    for key, app in APPS.items():
-        row.append(InlineKeyboardButton(f"{app['emoji']} {app['name']}", callback_data=f"pick_{key}"))
+    for key, app in configured_apps.items():
+        row.append(InlineKeyboardButton(app_label(app), callback_data=f"pick_{key}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
@@ -73,8 +112,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current = sessions.get(str(user.id))
     hint = ""
     if current:
-        cur_app = APPS.get(current["app"], APPS["other"])
-        hint = f"\n\nCurrent app: {cur_app['emoji']} {cur_app['name']}"
+        cur_app = configured_apps.get(current["app"], configured_apps.get("other", {"name": "Other", "emoji": "💬"}))
+        hint = f"\n\nCurrent app: {app_label(cur_app)}"
 
     await update.message.reply_text(
         f"Hi {user.first_name}!\n\nChoose your app:{hint}",
@@ -87,15 +126,15 @@ async def pick_app(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     app_key = query.data.replace("pick_", "")
-    if app_key not in APPS:
+    if app_key not in configured_apps:
         return
 
     user = query.from_user
     sessions[str(user.id)] = {"app": app_key, "name": user.first_name}
     save_json(SESSIONS_FILE, sessions)
-    app = APPS[app_key]
+    app = configured_apps[app_key]
 
-    await query.edit_message_text(f"{app['emoji']} {app['name']}\n\nType your message now.")
+    await query.edit_message_text(f"{app_label(app)}\n\nType your message now.")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,54 +147,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     session = sessions[uid]
-    app = APPS.get(session["app"], APPS["other"])
-
-    header = (
-        f"**{app['emoji']} {app['name']}**\n"
-        f"**From:** {user.first_name} (@{user.username or 'no username'})\n"
-        f"**User ID:** `{user.id}`\n\n"
-    )
+    app = configured_apps.get(session["app"], configured_apps.get("other", {"name": "Other", "emoji": "💬"}))
+    header = build_admin_header(app, user)
 
     # Handle different message types
     if message.text:
         admin_msg = await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=header + f"{message.text}",
-            parse_mode="Markdown"
+            text=header + md(message.text),
+            parse_mode="MarkdownV2"
         )
     elif message.photo:
         admin_msg = await context.bot.send_photo(
             chat_id=ADMIN_CHAT_ID,
             photo=message.photo[-1].file_id,
-            caption=header + (message.caption or "(photo)"),
-            parse_mode="Markdown"
+            caption=header + md(message.caption or "(photo)"),
+            parse_mode="MarkdownV2"
         )
     elif message.video:
         admin_msg = await context.bot.send_video(
             chat_id=ADMIN_CHAT_ID,
             video=message.video.file_id,
-            caption=header + (message.caption or "(video)"),
-            parse_mode="Markdown"
+            caption=header + md(message.caption or "(video)"),
+            parse_mode="MarkdownV2"
         )
     elif message.document:
         admin_msg = await context.bot.send_document(
             chat_id=ADMIN_CHAT_ID,
             document=message.document.file_id,
-            caption=header + (message.caption or "(file)"),
-            parse_mode="Markdown"
+            caption=header + md(message.caption or "(file)"),
+            parse_mode="MarkdownV2"
         )
     elif message.voice:
         admin_msg = await context.bot.send_voice(
             chat_id=ADMIN_CHAT_ID,
             voice=message.voice.file_id,
-            caption=header + "(voice)",
-            parse_mode="Markdown"
+            caption=header + md("(voice)"),
+            parse_mode="MarkdownV2"
         )
     elif message.sticker:
         await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=header + "(sticker)",
-            parse_mode="Markdown"
+            text=header + md("(sticker)"),
+            parse_mode="MarkdownV2"
         )
         admin_msg = await context.bot.send_sticker(
             chat_id=ADMIN_CHAT_ID,
@@ -164,8 +198,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         admin_msg = await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=header + "(unsupported message type)",
-            parse_mode="Markdown"
+            text=header + md("(unsupported message type)"),
+            parse_mode="MarkdownV2"
         )
 
     forwarded[str(admin_msg.message_id)] = user.id
@@ -224,11 +258,11 @@ async def apps_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all supported apps with their deep links."""
     bot_info = await context.bot.get_me()
     bot_username = bot_info.username
-    lines = ["**Supported Apps:**\n"]
-    for key, app in APPS.items():
+    lines = ["*Supported Apps:*\n"]
+    for key, app in configured_apps.items():
         if key != "other":
-            lines.append(f"  {app['emoji']} {app['name']} — `t.me/{bot_username}?start=app_{key}`")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+            lines.append(f"  {md(app_label(app))} — `t.me/{md(bot_username)}?start=app_{md(key)}`")
+    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
 
 
 def main():

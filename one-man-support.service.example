@@ -1,0 +1,15 @@
+[Unit]
+Description=One Man Support Telegram Bot
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/one-man-support
+ExecStart=/usr/bin/python3 /opt/one-man-support/bot.py
+Environment=BOT_TOKEN=your-telegram-bot-token
+Environment=ADMIN_CHAT_ID=your-telegram-user-id
+Environment=APP_CONFIG_FILE=/opt/one-man-support/apps.example.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

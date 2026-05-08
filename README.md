@@ -1,135 +1,180 @@
 # One Man Support
 
-Support for indie makers who'd rather ship than manage tickets.
+**A tiny Telegram helpdesk for indie makers, solo developers, and small app teams.**
 
-You ship apps. You don't have a support team. You don't need Zendesk, Intercom, or a ticketing system with 47 features you'll never use. You just need to know when a user has a problem and reply fast.
-
-This is a single Python file that turns your Telegram into a helpdesk. Users message the bot, you get it on your phone with context (which app, who sent it), you reply inline, they get your reply back. No dashboard. No login. No monthly fee. Just your phone.
+One Man Support turns one Telegram bot into support for all your apps. Users tap **Contact Support**, send a message, and you reply from Telegram. No dashboard, no login, no monthly helpdesk bill.
 
 ## Why
 
-I ship 7 apps solo. I tried support emails — they get buried. I tried forms — nobody fills them. I tried third-party tools — they cost money and add complexity for something that should be simple.
+Most solo developers do not need Zendesk, Intercom, or a full ticketing system. They need a simple way to know when a user has a problem and reply quickly.
 
-What I actually do when a user has a problem is pick up my phone and reply. So I built a bot that fits that workflow. One Telegram bot handles all my apps. Each app gets a deep link. Users tap "Contact Support" in the app or on the landing page, type their message, and I reply from my couch.
+Email gets buried. Forms feel cold. In-app chat SDKs add weight and cost. Telegram already gives you instant notifications, rich media, voice messages, and replies from your phone.
 
-It's been running in production across all my apps. It works.
+## How It Works
 
-## How it works
-
-```
-User opens bot → picks app → sends message
-                                    ↓
-                          You get it in your Telegram
-                          (with app name + user info)
-                                    ↓
-                          You reply to that message
-                                    ↓
-                          User gets your reply back
+```text
+User taps Contact Support
+        ↓
+Telegram bot opens with app context
+        ↓
+User sends text, screenshot, video, voice, or file
+        ↓
+You receive it in Telegram with app name + user info
+        ↓
+You reply inline
+        ↓
+User gets your reply
 ```
 
 ## Features
 
-- **Multi-app** — one bot, all your apps. Users pick which app they need help with
-- **Deep links** — `t.me/YourBot?start=app_myapp` skips the picker, drop it in your app or website
-- **Media** — users can send screenshots, videos, voice messages, documents, stickers
-- **Reply with anything** — text, photos, voice — whatever you reply with goes back to them
-- **Persistent** — survives restarts, remembers which user messaged about which app
-- **Single file** — one Python file, no database, no framework, no config files
-- **Zero cost** — Telegram bots are free, hosting is a $5 VPS or even a Raspberry Pi
+- **Multi-app support**: one bot handles all your apps.
+- **Deep links**: `t.me/YourBot?start=app_myapp` opens support for a specific app.
+- **Rich media**: screenshots, videos, voice messages, documents, and stickers.
+- **Reply routing**: reply to the forwarded message and the user gets your response.
+- **Persistent state**: remembers user app context across restarts.
+- **Simple deployment**: one Python file and one dependency.
+- **Configurable apps**: edit `bot.py` or use `APP_CONFIG_FILE=apps.example.json`.
+- **Zero SaaS cost**: host it on your own server, VPS, Raspberry Pi, Docker, or PM2.
+
+## Install
+
+```bash
+git clone https://github.com/naif824/one-man-support.git
+cd one-man-support
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```bash
+BOT_TOKEN=your-telegram-bot-token
+ADMIN_CHAT_ID=your-telegram-user-id
+APP_CONFIG_FILE=apps.example.json
+```
+
+Run:
+
+```bash
+export $(cat .env | xargs)
+python3 bot.py
+```
 
 ## Setup
 
-Takes about 3 minutes.
-
 ### 1. Create a Telegram bot
 
-Message [@BotFather](https://t.me/BotFather) on Telegram:
-- Send `/newbot`
-- Pick a name and username
-- Copy the token
+Message [@BotFather](https://t.me/BotFather):
 
-### 2. Get your chat ID
+```text
+/newbot
+```
 
-Message [@userinfobot](https://t.me/userinfobot) on Telegram — it replies with your user ID.
+Choose a name and username, then copy the bot token.
 
-### 3. Add your apps
+### 2. Get your Telegram user ID
 
-Edit the `APPS` dict in `bot.py`:
+Message [@userinfobot](https://t.me/userinfobot). It replies with your numeric user ID.
 
-```python
-APPS = {
-    "myapp":    {"name": "My App",    "emoji": "📱"},
-    "tracker":  {"name": "Tracker",   "emoji": "📊"},
-    "notes":    {"name": "Notes Pro", "emoji": "📝"},
-    "other":    {"name": "Other",     "emoji": "💬"},
+### 3. Configure your apps
+
+Use `apps.example.json`:
+
+```json
+{
+  "myapp": {
+    "name": "My App",
+    "emoji": "📱"
+  },
+  "other": {
+    "name": "Other",
+    "emoji": "💬"
+  }
 }
 ```
 
-### 4. Run
+The key becomes your deep-link slug:
 
-```bash
-pip install -r requirements.txt
-
-BOT_TOKEN=xxx ADMIN_CHAT_ID=xxx python3 bot.py
-```
-
-Or with a `.env` file:
-
-```bash
-cp .env.example .env
-# edit .env with your values
-
-export $(cat .env | xargs) && python3 bot.py
-```
-
-### 5. Keep it running
-
-With PM2:
-```bash
-BOT_TOKEN=xxx ADMIN_CHAT_ID=xxx pm2 start bot.py --name support --interpreter python3
-pm2 save
-```
-
-With systemd:
-```bash
-# /etc/systemd/system/support-bot.service
-[Unit]
-Description=One Man Support Bot
-
-[Service]
-ExecStart=/usr/bin/python3 /path/to/bot.py
-Environment=BOT_TOKEN=xxx
-Environment=ADMIN_CHAT_ID=xxx
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## Adding to your app or website
-
-Drop a "Contact Support" button that opens:
-
-```
+```text
 https://t.me/YourBot?start=app_myapp
 ```
 
-This deep link skips the app picker and goes straight to messaging. Put it in your app's settings screen, your landing page footer, or your App Store description.
+## Deployment
 
-Run `/apps` in the bot to see all your deep links.
+### PM2
 
-## Commands
+```bash
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+### Docker
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+### systemd
+
+Copy `one-man-support.service.example` to your server, edit paths and environment values, then:
+
+```bash
+sudo systemctl enable --now one-man-support
+```
+
+## Bot Commands
 
 | Command | Description |
-|---------|-------------|
-| `/start` | App picker (or direct entry via deep link) |
-| `/apps` | List all apps with their deep links |
+| --- | --- |
+| `/start` | Choose an app or enter through a deep link |
+| `/apps` | Show configured app deep links |
 
-## Who this is for
+## Add To Your App
 
-- Indie developers shipping multiple apps
-- Solo makers who want user feedback without infrastructure
-- Anyone who thinks support tools shouldn't cost more than the apps they support
+Use a normal link:
+
+```text
+https://t.me/YourBot?start=app_myapp
+```
+
+Good places:
+
+- app settings screen
+- help page
+- website footer
+- App Store / Play Store support URL
+- onboarding email
+
+## Who It Is For
+
+- indie iOS and Android developers
+- solo SaaS builders
+- makers with multiple small apps
+- small teams who live in Telegram
+- people who want support without support software
+
+## What It Is Not
+
+One Man Support is intentionally small. It is not a full CRM, ticketing suite, analytics dashboard, or team inbox.
+
+If you need assignments, SLAs, macros, reports, and a web dashboard, use a real helpdesk. If you want users to reach you fast and you want to reply from your phone, this is enough.
+
+## Test
+
+```bash
+python3 -m unittest -v
+python3 -m py_compile bot.py
+```
+
+## Security Notes
+
+- Keep `BOT_TOKEN` private.
+- Keep `.env` out of git.
+- Use a private `ADMIN_CHAT_ID`.
+- Run one bot per trusted owner or forward to a private Telegram group.
+- User messages and routing state are stored under `data/`.
 
 ## License
 

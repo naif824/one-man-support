@@ -1,0 +1,10 @@
+services:
+  one-man-support:
+    build: .
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      ADMIN_CHAT_ID: ${ADMIN_CHAT_ID}
+      APP_CONFIG_FILE: /app/apps.example.json
+    volumes:
+      - ./data:/app/data
